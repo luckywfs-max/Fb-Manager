@@ -1,0 +1,605 @@
+import os, shutil, subprocess, tkinter as tk
+from tkinter import messagebox, filedialog
+import re
+import json
+import time
+
+CONFIG_FILE = "path_config.json"
+DEFAULT_URL = "https://www.facebook.com/pages/creation/?profile_switcher_unified_creation"
+
+def find_brave():
+    possible = [
+        r"C:\Program Files\BraveSoftware\Brave-Browser\Application\brave.exe",
+        r"C:\Program Files (x86)\BraveSoftware\Brave-Browser\Application\brave.exe",
+        os.path.expandvars(r"%LOCALAPPDATA%\BraveSoftware\Brave-Browser\Application\brave.exe"),
+    ]
+    for p in possible:
+        if os.path.exists(p):
+            return p
+    return r"C:\Program Files\BraveSoftware\Brave-Browser\Application\brave.exe"
+
+def load_config():
+    default = {
+        "folder_path": r"D:\fb\1",
+        "chrome_path": find_brave(),
+        "profile_number": "6",
+        "batch_size": "1",
+        "url": DEFAULT_URL,
+        "rename_folder_path": r"J:\Facebook Work\old",
+        "rename_start_num": "1",
+        "merge_source_path": "",
+        "merge_target_path": r"D:\fb\1"
+    }
+    if os.path.exists(CONFIG_FILE):
+        try:
+            with open(CONFIG_FILE, 'r') as f:
+                default.update(json.load(f))
+        except:
+            pass
+    if os.path.isdir(default.get("chrome_path", "")):
+        default["chrome_path"] = os.path.join(default["chrome_path"], "brave.exe")
+    return default
+
+def save_config():
+    data = {
+        "folder_path": folder_var.get(),
+        "chrome_path": chrome_var.get(),
+        "profile_number": profile_var.get(),
+        "batch_size": batch_var.get(),
+        "url": url_var.get(),
+        "rename_folder_path": rename_folder_var.get(),
+        "rename_start_num": rename_start_var.get(),
+        "merge_source_path": merge_src_var.get(),
+        "merge_target_path": merge_dst_var.get()
+    }
+    with open(CONFIG_FILE, 'w') as f:
+        json.dump(data, f, indent=2)
+    update_ui_texts()
+
+def fit_window_to_content():
+    root.update_idletasks()
+    w = root.winfo_reqwidth()
+    h = root.winfo_reqheight()
+    root.geometry(f"{w}x{h}")
+
+def set_facebook_window_icon(win):
+    ico_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fb_icon.ico")
+    if os.path.exists(ico_path):
+        try:
+            win.iconbitmap(ico_path)
+            return
+        except:
+            pass
+
+    # Built-in blue Facebook 'f' icon (32x32)
+    size = 32
+    img = tk.PhotoImage(width=size, height=size)
+    fb_blue = "#1877F2"
+    white = "#FFFFFF"
+
+    for y in range(size):
+        for x in range(size):
+            # Rounded corner mask
+            dx = max(0, 4 - x, x - (size - 5))
+            dy = max(0, 4 - y, y - (size - 5))
+            if dx * dx + dy * dy <= 16:
+                img.put(fb_blue, (x, y))
+
+    # Draw stylized 'f'
+    for y in range(7, 29):
+        for x in range(16, 21):
+            if y == 7 and x < 18:
+                continue
+            img.put(white, (x, y))
+    for y in range(7, 13):
+        for x in range(17, 25):
+            if (x - 17) + (12 - y) < 3:
+                continue
+            img.put(white, (x, y))
+    for y in range(14, 18):
+        for x in range(12, 24):
+            img.put(white, (x, y))
+
+    win._fb_icon_ref = img
+    win.iconphoto(True, img)
+
+def get_all_profiles(folder):
+    nums = []
+    if not os.path.exists(folder): return []
+    for name in os.listdir(folder):
+        m = re.match(r"Profile\s*(\d+)", name, re.IGNORECASE)
+        if m: nums.append(int(m.group(1)))
+    nums.sort()
+    return nums
+
+def update_ui_texts(*args):
+    try:
+        b = int(batch_var.get()); p = int(profile_var.get())
+    except: return
+    open_btn.config(text=f"Open {b}")
+    status_label.config(text=f"Ready - {p} to {p+b-1} | Single Tab Fixed", fg="green")
+
+def browse_brave():
+    path = filedialog.askopenfilename(title="Select brave.exe")
+    if path:
+        chrome_var.set(path); save_config()
+
+def browse_folder():
+    path = filedialog.askdirectory(title="Select Profile Folder")
+    if path:
+        folder_var.set(path)
+        save_config()
+
+def browse_rename_folder():
+    path = filedialog.askdirectory(title="Select Folder to Rename Profiles")
+    if path:
+        rename_folder_var.set(path); save_config()
+
+def browse_merge_source():
+    path = filedialog.askdirectory(title="Select Source Folder (Jahan se profiles lane hain)")
+    if path:
+        merge_src_var.set(path); save_config()
+
+def browse_merge_target():
+    path = filedialog.askdirectory(title="Select Target Folder (Jahan sab profiles jama karne hain)")
+    if path:
+        merge_dst_var.set(path); save_config()
+
+def clean_session_files(profile_path):
+    try:
+        files_to_delete = [
+            "Current Session", "Current Tabs", "Last Session", "Last Tabs", "Last Tabs.lock",
+            "Tabs", "Sessions"
+        ]
+        for fname in files_to_delete:
+            fpath = os.path.join(profile_path, fname)
+            if os.path.exists(fpath):
+                try:
+                    if os.path.isdir(fpath):
+                        shutil.rmtree(fpath)
+                    else:
+                        os.remove(fpath)
+                except: pass
+        default_dir = os.path.join(profile_path, "Default")
+        if os.path.exists(default_dir):
+            for fname in files_to_delete:
+                fpath = os.path.join(default_dir, fname)
+                if os.path.exists(fpath):
+                    try:
+                        if os.path.isdir(fpath):
+                            shutil.rmtree(fpath)
+                        else:
+                            os.remove(fpath)
+                    except: pass
+    except:
+        pass
+
+# --- Sirf Open Ki Gayi Profiles Ki Lights ---
+running_procs = {}    # {profile_num: subprocess.Popen}
+tracked_order = []    # Jin profiles ko open kiya gaya hai unki order list
+profile_badges = {}   # {profile_num: {"frame": Frame, "dot": Label, "lbl": Label}}
+
+def set_profile_light(num, is_open):
+    badge = profile_badges.get(num)
+    if not badge:
+        return
+    if is_open:
+        bg_color = "#c8e6c9"
+        fg_color = "#1b5e20"
+        dot_color = "#2e7d32"
+        border_color = "#66bb6a"
+    else:
+        bg_color = "#eeeeee"
+        fg_color = "#757575"
+        dot_color = "#bdbdbd"
+        border_color = "#d6d6d6"
+
+    badge["frame"].config(bg=bg_color, highlightbackground=border_color)
+    badge["dot"].config(bg=bg_color, fg=dot_color)
+    badge["lbl"].config(bg=bg_color, fg=fg_color)
+
+def render_tracked_lights():
+    for widget in lights_inner_frame.winfo_children():
+        widget.destroy()
+    profile_badges.clear()
+
+    if not tracked_order:
+        tk.Label(
+            lights_inner_frame,
+            text="Abhi koi profile open nahi ki gayi",
+            fg="#757575",
+            bg="#fafafa",
+            font=("Arial", 8)
+        ).pack(side=tk.LEFT, padx=6, pady=2)
+        fit_window_to_content()
+        return
+
+    cols = 10
+    for idx, num in enumerate(tracked_order):
+        r = idx // cols
+        c = idx % cols
+
+        p_frame = tk.Frame(
+            lights_inner_frame,
+            bg="#eeeeee",
+            highlightbackground="#d6d6d6",
+            highlightthickness=1,
+            padx=6,
+            pady=2
+        )
+        p_frame.grid(row=r, column=c, padx=3, pady=2, sticky="w")
+
+        dot_lbl = tk.Label(p_frame, text="●", fg="#bdbdbd", bg="#eeeeee", font=("Arial", 9))
+        dot_lbl.pack(side=tk.LEFT, padx=(0, 3))
+
+        num_lbl = tk.Label(p_frame, text=str(num), fg="#757575", bg="#eeeeee", font=("Arial", 8, "bold"))
+        num_lbl.pack(side=tk.LEFT)
+
+        profile_badges[num] = {"frame": p_frame, "dot": dot_lbl, "lbl": num_lbl}
+        is_open = num in running_procs and running_procs[num].poll() is None
+        set_profile_light(num, is_open=is_open)
+
+    fit_window_to_content()
+
+def add_or_refresh_tracked_profile(num, proc):
+    running_procs[num] = proc
+    if num not in tracked_order:
+        tracked_order.append(num)
+        render_tracked_lights()
+    set_profile_light(num, is_open=True)
+
+def launch_single_profile(num, folder, chrome, url):
+    profile_path = os.path.join(folder, f"Profile {num}")
+    if not os.path.exists(profile_path):
+        return False
+    clean_session_files(profile_path)
+    port = 9200 + num
+    proc = subprocess.Popen([
+        chrome,
+        f"--user-data-dir={profile_path}",
+        "--new-window",
+        f"--remote-debugging-port={port}",
+        "--disable-restore-session-state",
+        "--disable-session-crashed-bubble",
+        "--no-first-run",
+        "--no-default-browser-check",
+        url
+    ])
+    add_or_refresh_tracked_profile(num, proc)
+    return True
+
+def open_profile():
+    try:
+        start_num = int(profile_var.get())
+        folder = folder_var.get().strip()
+        chrome = chrome_var.get().strip()
+        batch_size = int(batch_var.get())
+        url = url_var.get().strip() or DEFAULT_URL
+        if os.path.isdir(chrome):
+            chrome = os.path.join(chrome, "brave.exe")
+            chrome_var.set(chrome)
+        if not os.path.exists(folder):
+            return
+        if not os.path.exists(chrome):
+            return
+        save_config()
+        all_profiles = get_all_profiles(folder)
+        batch = [p for p in all_profiles if p >= start_num][:batch_size]
+        if not batch:
+            status_label.config(text="Saare profiles khatam!", fg="red")
+            return
+        for num in batch:
+            if launch_single_profile(num, folder, chrome, url):
+                time.sleep(0.5)
+        profile_var.set(str(batch[-1] + 1))
+        save_config()
+        status_label.config(text=f"Opened: {batch[0]} to {batch[-1]}", fg="green")
+    except Exception as e:
+        print(e)
+
+def poll_open_profiles():
+    for num in list(running_procs.keys()):
+        proc = running_procs[num]
+        if proc.poll() is not None:
+            del running_procs[num]
+            set_profile_light(num, is_open=False)
+        else:
+            set_profile_light(num, is_open=True)
+    root.after(1000, poll_open_profiles)
+
+def change_num(d):
+    try:
+        v = int(profile_var.get()) + d
+        if v >= 1: profile_var.set(str(v)); save_config()
+    except: profile_var.set("1")
+
+def change_batch(d):
+    try:
+        v = int(batch_var.get()) + d
+        if v >= 1: batch_var.set(str(v)); save_config()
+    except: batch_var.set("1")
+    update_ui_texts()
+
+def delete_profile():
+    try:
+        num = delete_num_var.get().strip()
+        folder = folder_var.get().strip()
+        if not num:
+            status_label.config(text="Delete karne ke liye number likhein", fg="red")
+            return
+        path = os.path.join(folder, f"Profile {num}")
+        if not os.path.exists(path):
+            status_label.config(text=f"Profile {num} nahi mila", fg="red")
+            return
+        if messagebox.askyesno("Delete", f"Profile {num} delete?\n{path}"):
+            n_int = int(num)
+            if n_int in running_procs:
+                try:
+                    running_procs[n_int].terminate()
+                    del running_procs[n_int]
+                except: pass
+            if n_int in tracked_order:
+                tracked_order.remove(n_int)
+                render_tracked_lights()
+            shutil.rmtree(path)
+            delete_num_var.set("")
+            status_label.config(text=f"Profile {num} delete ho gaya", fg="green")
+    except Exception as e:
+        print(e)
+        status_label.config(text=f"Error: {e}", fg="red")
+
+def rename_single_profile():
+    try:
+        old = profile_var.get().strip(); new = new_profile_var.get().strip(); folder = folder_var.get().strip()
+        if not new: return
+        os.rename(os.path.join(folder, f"Profile {old}"), os.path.join(folder, f"Profile {new}"))
+        profile_var.set(new); save_config()
+        status_label.config(text=f"{old} -> {new}", fg="green")
+    except Exception as e: print(e)
+
+def _numeric_sort_key(name):
+    m = re.search(r"(\d+)", name)
+    return (int(m.group(1)) if m else float("inf"), name.lower())
+
+def rename_folders_with_profile_prefix():
+    try:
+        target_folder = rename_folder_var.get().strip()
+        if not target_folder or not os.path.exists(target_folder):
+            status_label.config(text="Rename wala folder path sahi nahi hai!", fg="red")
+            return
+
+        try:
+            start_num = int(rename_start_var.get().strip())
+        except:
+            start_num = 1
+
+        folders = [
+            f for f in os.listdir(target_folder)
+            if os.path.isdir(os.path.join(target_folder, f)) and not f.startswith("__tmp_ren_")
+        ]
+        folders.sort(key=_numeric_sort_key)
+
+        if not folders:
+            status_label.config(text="Is folder mein koi sub-folder nahi mila", fg="red")
+            return
+
+        if not messagebox.askyesno(
+            "Rename Profiles",
+            f"{len(folders)} folders ko 'Profile {start_num}' se line se rename karein?\nFolder: {target_folder}"
+        ):
+            return
+
+        save_config()
+
+        temp_entries = []
+        for idx, folder_name in enumerate(folders):
+            old_full_path = os.path.join(target_folder, folder_name)
+            temp_name = f"__tmp_ren_{idx}_{folder_name}"
+            temp_full_path = os.path.join(target_folder, temp_name)
+            os.rename(old_full_path, temp_full_path)
+            temp_entries.append((temp_full_path, folder_name))
+
+        for i, (temp_full_path, orig_name) in enumerate(temp_entries, start=start_num):
+            new_folder_name = f"Profile {i}"
+            new_full_path = os.path.join(target_folder, new_folder_name)
+            os.rename(temp_full_path, new_full_path)
+            print(f"Folder '{orig_name}' renamed to '{new_folder_name}'.")
+
+        status_label.config(
+            text=f"Renamed {len(folders)} folders: Profile {start_num} to Profile {start_num + len(folders) - 1}",
+            fg="green"
+        )
+    except Exception as e:
+        print(e)
+        status_label.config(text=f"Rename Error: {e}", fg="red")
+
+def merge_and_renumber_profiles():
+    try:
+        src_folder = merge_src_var.get().strip()
+        dst_folder = merge_dst_var.get().strip()
+
+        if not src_folder or not os.path.exists(src_folder):
+            status_label.config(text="Source folder path sahi nahi hai!", fg="red")
+            return
+        if not dst_folder:
+            status_label.config(text="Target folder path likhein!", fg="red")
+            return
+
+        if os.path.abspath(src_folder) == os.path.abspath(dst_folder):
+            status_label.config(text="Source aur Target folder alag hone chahiye!", fg="red")
+            return
+
+        os.makedirs(dst_folder, exist_ok=True)
+
+        src_folders = [
+            f for f in os.listdir(src_folder)
+            if os.path.isdir(os.path.join(src_folder, f)) and not f.startswith("__tmp_ren_")
+        ]
+        src_folders.sort(key=_numeric_sort_key)
+
+        if not src_folders:
+            status_label.config(text="Source folder mein koi profile folder nahi mila!", fg="red")
+            return
+
+        existing_dst_nums = get_all_profiles(dst_folder)
+        next_num = (max(existing_dst_nums) + 1) if existing_dst_nums else 1
+
+        if not messagebox.askyesno(
+            "Merge & Rename Profiles",
+            f"{len(src_folders)} profiles ko:\nFrom: {src_folder}\nTo: {dst_folder}\n\n"
+            f"Naye naam: Profile {next_num} se Profile {next_num + len(src_folders) - 1} tak rakhe jayenge.\nAage barhein?"
+        ):
+            return
+
+        save_config()
+
+        moved_count = 0
+        for idx, folder_name in enumerate(src_folders):
+            src_path = os.path.join(src_folder, folder_name)
+            while os.path.exists(os.path.join(dst_folder, f"Profile {next_num}")):
+                next_num += 1
+            dst_path = os.path.join(dst_folder, f"Profile {next_num}")
+            shutil.move(src_path, dst_path)
+            print(f"Moved '{folder_name}' -> '{dst_path}'")
+            next_num += 1
+            moved_count += 1
+
+        first_assigned = next_num - moved_count
+        last_assigned = next_num - 1
+        status_label.config(
+            text=f"Moved & Renamed {moved_count} profiles to Target (Profile {first_assigned} to {last_assigned})",
+            fg="green"
+        )
+    except Exception as e:
+        print(e)
+        status_label.config(text=f"Merge Error: {e}", fg="red")
+
+def on_closing():
+    save_config(); root.destroy()
+
+root = tk.Tk()
+root.title("FB Profile Manager")
+root.resizable(False, False)
+set_facebook_window_icon(root)
+
+config = load_config()
+profile_var = tk.StringVar(value=config.get("profile_number", "6"))
+batch_var = tk.StringVar(value=config.get("batch_size", "1"))
+new_profile_var = tk.StringVar()
+delete_num_var = tk.StringVar()
+folder_var = tk.StringVar(value=config.get("folder_path"))
+chrome_var = tk.StringVar(value=config.get("chrome_path"))
+url_var = tk.StringVar(value=config.get("url", DEFAULT_URL))
+rename_folder_var = tk.StringVar(value=config.get("rename_folder_path", r"J:\Facebook Work\old"))
+rename_start_var = tk.StringVar(value=config.get("rename_start_num", "1"))
+merge_src_var = tk.StringVar(value=config.get("merge_source_path", ""))
+merge_dst_var = tk.StringVar(value=config.get("merge_target_path", config.get("folder_path", r"D:\fb\1")))
+
+tk.Label(root, text="Enter Profile number :-").grid(row=0, column=0, padx=(10, 6), pady=4, sticky='w')
+tk.Entry(root, textvariable=profile_var, width=12).grid(row=0, column=1, padx=2)
+tk.Button(root, text="-", width=5, command=lambda: change_num(-1)).grid(row=0, column=2, padx=2)
+tk.Button(root, text="+", width=5, command=lambda: change_num(1)).grid(row=0, column=3, padx=2)
+open_btn = tk.Button(root, text=f"Open {config.get('batch_size','1')}", width=12, command=open_profile, bg="#4caf50", fg="white", font=("Arial", 9, "bold"))
+open_btn.grid(row=0, column=4, columnspan=2, padx=(6, 10), sticky='e')
+
+tk.Label(root, text="Batch Size :-").grid(row=1, column=0, padx=(10, 6), pady=3, sticky='w')
+tk.Entry(root, textvariable=batch_var, width=12).grid(row=1, column=1, padx=2)
+tk.Button(root, text="-", width=5, command=lambda: change_batch(-1)).grid(row=1, column=2, padx=2)
+tk.Button(root, text="+", width=5, command=lambda: change_batch(1)).grid(row=1, column=3, padx=2)
+
+tk.Label(root, text="New Profile number :-").grid(row=2, column=0, padx=(10, 6), pady=3, sticky='w')
+tk.Entry(root, textvariable=new_profile_var, width=12).grid(row=2, column=1, padx=2)
+tk.Button(root, text="Rename", width=10, command=rename_single_profile).grid(row=2, column=4, columnspan=2, padx=(6, 10), sticky='e')
+
+tk.Label(root, text="Enter URL :-").grid(row=3, column=0, padx=(10, 6), pady=3, sticky='w')
+tk.Entry(root, textvariable=url_var, width=54).grid(row=3, column=1, columnspan=4, padx=2, sticky='w')
+
+tk.Label(root, text="Enter folder path :-").grid(row=4, column=0, padx=(10, 6), pady=3, sticky='w')
+tk.Entry(root, textvariable=folder_var, width=46).grid(row=4, column=1, columnspan=3, padx=2, sticky='w')
+tk.Button(root, text="Browse", command=browse_folder).grid(row=4, column=4, columnspan=2, padx=(6, 10), sticky='e')
+
+tk.Label(root, text="Enter Brave path :-").grid(row=5, column=0, padx=(10, 6), pady=3, sticky='w')
+tk.Entry(root, textvariable=chrome_var, width=46).grid(row=5, column=1, columnspan=3, padx=2, sticky='w')
+tk.Button(root, text="Browse", command=browse_brave).grid(row=5, column=4, columnspan=2, padx=(6, 10), sticky='e')
+
+# --- Sirf Open Ki Gayi Profiles Ki Lights ---
+lights_frame = tk.LabelFrame(root, text="Opened Profiles (● Light Green = Open | ● Light Dhul = Band)", padx=8, pady=3)
+lights_frame.grid(row=6, column=0, columnspan=6, padx=10, pady=3, sticky='ew')
+
+lights_inner_frame = tk.Frame(lights_frame, bg="#fafafa")
+lights_inner_frame.pack(fill=tk.BOTH, expand=True)
+
+# --- Alag Delete Section ---
+delete_frame = tk.LabelFrame(root, text="Delete Profile", padx=10, pady=3)
+delete_frame.grid(row=7, column=0, columnspan=6, padx=10, pady=3, sticky='ew')
+
+tk.Label(delete_frame, text="Delete Profile number :-").pack(side=tk.LEFT, padx=(0, 8))
+tk.Entry(delete_frame, textvariable=delete_num_var, width=12).pack(side=tk.LEFT, padx=(0, 8))
+tk.Button(
+    delete_frame,
+    text="Delete",
+    width=12,
+    command=delete_profile,
+    bg="#e53935",
+    fg="white",
+    font=("Arial", 9, "bold")
+).pack(side=tk.LEFT)
+
+# --- Alag Rename Section ---
+rename_frame = tk.LabelFrame(root, text="Rename Profiles (Line se ginti: Profile 1, Profile 2...)", padx=10, pady=4)
+rename_frame.grid(row=8, column=0, columnspan=6, padx=10, pady=3, sticky='ew')
+
+tk.Label(rename_frame, text="Folder path :-").grid(row=0, column=0, padx=(0, 6), pady=2, sticky='w')
+tk.Entry(rename_frame, textvariable=rename_folder_var, width=44).grid(row=0, column=1, padx=(0, 6), pady=2, sticky='w')
+tk.Button(rename_frame, text="Browse", command=browse_rename_folder).grid(row=0, column=2, padx=(0, 8), pady=2)
+
+tk.Label(rename_frame, text="Start #:").grid(row=0, column=3, padx=(0, 4), pady=2, sticky='w')
+tk.Entry(rename_frame, textvariable=rename_start_var, width=6).grid(row=0, column=4, padx=(0, 8), pady=2)
+
+tk.Button(
+    rename_frame,
+    text="Rename All",
+    width=12,
+    command=rename_folders_with_profile_prefix,
+    bg="#1e88e5",
+    fg="white",
+    font=("Arial", 9, "bold")
+).grid(row=0, column=5, pady=2)
+
+# --- Alag Merge & Renumber Section (2 Folders ko 1 mein jama karne ke liye) ---
+merge_frame = tk.LabelFrame(root, text="Merge 2 Folders into 1 (Same Profile names ko aage number de kar move karega)", padx=10, pady=4)
+merge_frame.grid(row=9, column=0, columnspan=6, padx=10, pady=3, sticky='ew')
+
+tk.Label(merge_frame, text="From Folder :-").grid(row=0, column=0, padx=(0, 6), pady=2, sticky='w')
+tk.Entry(merge_frame, textvariable=merge_src_var, width=44).grid(row=0, column=1, padx=(0, 6), pady=2, sticky='w')
+tk.Button(merge_frame, text="Browse", command=browse_merge_source).grid(row=0, column=2, padx=(0, 6), pady=2)
+
+tk.Label(merge_frame, text="To Folder :-").grid(row=1, column=0, padx=(0, 6), pady=2, sticky='w')
+tk.Entry(merge_frame, textvariable=merge_dst_var, width=44).grid(row=1, column=1, padx=(0, 6), pady=2, sticky='w')
+tk.Button(merge_frame, text="Browse", command=browse_merge_target).grid(row=1, column=2, padx=(0, 6), pady=2)
+
+tk.Button(
+    merge_frame,
+    text="Move & Rename",
+    width=14,
+    command=merge_and_renumber_profiles,
+    bg="#6a1b9a",
+    fg="white",
+    font=("Arial", 9, "bold")
+).grid(row=0, column=3, rowspan=2, columnspan=3, padx=8, pady=2)
+
+status_label = tk.Label(root, text="", fg="green", font=("Arial", 9, "bold"))
+status_label.grid(row=10, column=0, columnspan=6, pady=(3, 0))
+
+footer_label = tk.Label(root, text="by Ahsan Hashmi", fg="#666666", font=("Arial", 8, "italic"))
+footer_label.grid(row=11, column=0, columnspan=6, pady=(0, 4))
+
+profile_var.trace_add("write", update_ui_texts)
+batch_var.trace_add("write", update_ui_texts)
+
+update_ui_texts()
+render_tracked_lights()
+fit_window_to_content()
+root.after(1000, poll_open_profiles)
+root.protocol("WM_DELETE_WINDOW", on_closing)
+root.mainloop()
